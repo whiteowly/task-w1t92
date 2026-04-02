@@ -1,0 +1,6 @@
+Django==5.2.6
+djangorestframework==3.16.1
+PyMySQL==1.1.1
+cryptography==44.0.2
+Pillow==11.1.0
+pypdf==5.4.0

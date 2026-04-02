@@ -1,0 +1,71 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: docker/mysql/Dockerfile
+    environment:
+      MYSQL_DATABASE: heritage_ops
+      MYSQL_USER: heritage
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$(cat /run/runtime-secrets/mysql_root_password)\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - runtime_secrets:/run/runtime-secrets
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,[::1],api"
+      DJANGO_SECRET_KEY_FILE: /run/runtime-secrets/django_secret_key
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: heritage_ops
+      MYSQL_USER: heritage
+      MYSQL_PASSWORD_FILE: /run/runtime-secrets/mysql_user_password
+      TZ: UTC
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./media:/app/media
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+      - runtime_secrets:/run/runtime-secrets
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SKIP_MIGRATE: "1"
+      DJANGO_DEBUG: "0"
+      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,[::1],api"
+      DJANGO_SECRET_KEY_FILE: /run/runtime-secrets/django_secret_key
+      MYSQL_HOST: db
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: heritage_ops
+      MYSQL_USER: heritage
+      MYSQL_PASSWORD_FILE: /run/runtime-secrets/mysql_user_password
+      TZ: UTC
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - runtime_secrets:/run/runtime-secrets
+    command: ["python", "manage.py", "run_scheduler"]
+
+volumes:
+  mysql_data:
+  runtime_secrets:

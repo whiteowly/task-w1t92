@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+coverage.xml
+.coverage
+htmlcov/
+media/
+exports/
+logs/
+*.log
+.DS_Store

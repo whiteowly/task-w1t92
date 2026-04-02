@@ -1,0 +1,21 @@
+# VCS / local tooling
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime-generated local artifacts (must not enter build context)
+exports/
+media/
+logs/
+
+# Local virtualenvs
+.venv/
+venv/
