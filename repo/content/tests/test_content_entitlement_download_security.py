@@ -16,6 +16,7 @@ from content.models import (
     ContentChapter,
     ContentDownloadRequestLog,
     ContentDownloadToken,
+    ContentEntitlement,
     ContentRedeemCode,
 )
 from iam.models import AuthSession, Role, UserOrganizationRole
@@ -342,4 +343,64 @@ class ContentEntitlementDownloadSecurityTests(TestCase):
                 asset_id=self.asset_id,
                 status="served",
             ).exists()
+        )
+
+    def test_download_token_rejected_after_entitlement_revoked(self):
+        self.admin_client.post(
+            "/api/v1/content/entitlements/",
+            {"user": self.member.id, "asset": self.asset_id, "is_active": True},
+            format="json",
+        )
+
+        token_resp = self.member_client.post(
+            "/api/v1/content/download-tokens/",
+            {"asset": self.asset_id, "purpose": "download"},
+            format="json",
+        )
+        self.assertEqual(token_resp.status_code, 201)
+        token_value = token_resp.json()["token"]
+
+        ContentEntitlement.objects.filter(
+            organization=self.org,
+            user=self.member,
+            asset_id=self.asset_id,
+        ).update(is_active=False)
+
+        download_resp = self.member_client.get(
+            f"/api/v1/content/secured-download/{token_value}/"
+        )
+        self.assertEqual(download_resp.status_code, 403)
+        self.assertEqual(
+            download_resp.json()["error"]["code"],
+            "content.entitlement.required",
+        )
+
+    def test_download_token_rejected_after_asset_unpublished(self):
+        self.admin_client.post(
+            "/api/v1/content/entitlements/",
+            {"user": self.member.id, "asset": self.asset_id, "is_active": True},
+            format="json",
+        )
+
+        token_resp = self.member_client.post(
+            "/api/v1/content/download-tokens/",
+            {"asset": self.asset_id, "purpose": "download"},
+            format="json",
+        )
+        self.assertEqual(token_resp.status_code, 201)
+        token_value = token_resp.json()["token"]
+
+        self.admin_client.post(
+            f"/api/v1/content/assets/{self.asset_id}/unpublish/",
+            {},
+            format="json",
+        )
+
+        download_resp = self.member_client.get(
+            f"/api/v1/content/secured-download/{token_value}/"
+        )
+        self.assertEqual(download_resp.status_code, 403)
+        self.assertEqual(
+            download_resp.json()["error"]["code"],
+            "content.asset.not_published",
         )

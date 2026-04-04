@@ -131,3 +131,45 @@ class ObservabilityReportingApiTests(TestCase):
         self.assertGreater(metadata["file_size_bytes"], 0)
         self.assertGreaterEqual(metadata["row_count"], 1)
         self.assertEqual(len(metadata["sha256"]), 64)
+
+    def test_report_export_detail_returns_created_export_payload(self):
+        create_resp = self.admin_client.post(
+            "/api/v1/observability/report-exports/",
+            {"report_type": "audit_log_csv"},
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, 201)
+
+        export_id = create_resp.json()["id"]
+        detail_resp = self.admin_client.get(
+            f"/api/v1/observability/report-exports/{export_id}/"
+        )
+
+        self.assertEqual(detail_resp.status_code, 200)
+        self.assertEqual(detail_resp.json(), create_resp.json())
+
+    def test_report_export_detail_is_tenant_isolated(self):
+        create_resp = self.admin_client.post(
+            "/api/v1/observability/report-exports/",
+            {"report_type": "audit_log_csv"},
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, 201)
+
+        other_org = Organization.objects.create(
+            name="Org B",
+            slug="org-b",
+            timezone="UTC",
+        )
+        other_admin = User.objects.create_user(
+            username="obs-admin-b",
+            password="ValidPass123!",
+        )
+        self._assign_role(other_admin, other_org, RoleCode.ADMINISTRATOR.value)
+        other_client = self._build_client(other_admin, other_org)
+
+        detail_resp = other_client.get(
+            f"/api/v1/observability/report-exports/{create_resp.json()['id']}/"
+        )
+
+        self.assertEqual(detail_resp.status_code, 404)

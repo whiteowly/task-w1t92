@@ -808,6 +808,56 @@ def generate_secured_download_artifact(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
 
+    if token.asset.state != AssetState.PUBLISHED:
+        _record_download_request_log(
+            organization=organization,
+            user=user,
+            asset=token.asset,
+            status="asset_unpublished",
+        )
+        raise DomainAPIException(
+            code="content.asset.not_published",
+            message="Asset is no longer published.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+    role_codes = set(
+        organization.user_roles.filter(user=user, is_active=True).values_list(
+            "role__code", flat=True
+        )
+    )
+    if not user_has_asset_acl_access(
+        user=user, role_codes=role_codes, asset=token.asset
+    ):
+        _record_download_request_log(
+            organization=organization,
+            user=user,
+            asset=token.asset,
+            status="acl_revoked",
+        )
+        raise DomainAPIException(
+            code="content.access.denied",
+            message="Asset access denied by chapter ACL coverage.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
+    if not _is_manager_role(role_codes) and not user_has_entitlement(
+        organization=organization,
+        user=user,
+        asset=token.asset,
+    ):
+        _record_download_request_log(
+            organization=organization,
+            user=user,
+            asset=token.asset,
+            status="entitlement_revoked",
+        )
+        raise DomainAPIException(
+            code="content.entitlement.required",
+            message="Entitlement has been revoked.",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+
     try:
         source_path = _resolve_asset_source_path(token.asset)
         output_path = _artifact_output_path(

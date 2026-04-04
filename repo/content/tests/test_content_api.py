@@ -1,7 +1,7 @@
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -402,3 +402,173 @@ class ContentApiTests(TestCase):
         self.assertEqual(
             import_resp.json()["error"]["code"], "content.import_validation_failed"
         )
+
+    def test_member_role_acl_does_not_bypass_asset_entitlement_checks(self):
+        org = Organization.objects.create(
+            name="Entitlement Org",
+            slug="entitlement-org",
+            timezone="UTC",
+        )
+        manager = User.objects.create_user(
+            username="content-manager-entitlement",
+            password="ValidPass123!",
+        )
+        member = User.objects.create_user(
+            username="content-member-entitlement",
+            password="ValidPass123!",
+        )
+        self._assign_role(manager, org, RoleCode.CLUB_MANAGER.value)
+        self._assign_role(member, org, RoleCode.MEMBER.value)
+
+        manager_client = self._build_client(manager, org)
+        member_client = self._build_client(member, org)
+
+        asset_resp = manager_client.post(
+            "/api/v1/content/assets/",
+            {
+                "external_id": "asset-entitlement-acl",
+                "title": "Entitled Asset",
+                "creator": "Curator",
+                "period": "Modern",
+                "style": "Archive",
+                "medium": "Paper",
+                "size": "A4",
+                "source": "Club Archive",
+                "copyright_status": "licensed",
+                "tags": ["restricted"],
+                "allow_download": False,
+                "allow_share": False,
+            },
+            format="json",
+        )
+        self.assertEqual(asset_resp.status_code, 201)
+        asset_id = asset_resp.json()["id"]
+
+        publish_resp = manager_client.post(
+            f"/api/v1/content/assets/{asset_id}/publish/",
+            {},
+            format="json",
+        )
+        self.assertEqual(publish_resp.status_code, 200)
+
+        chapter_resp = manager_client.post(
+            "/api/v1/content/chapters/",
+            {"asset": asset_id, "title": "Member Chapter", "order_index": 1},
+            format="json",
+        )
+        self.assertEqual(chapter_resp.status_code, 201)
+
+        acl_resp = manager_client.post(
+            "/api/v1/content/chapter-acl/",
+            {
+                "chapter": chapter_resp.json()["id"],
+                "principal_type": "role",
+                "principal_value": RoleCode.MEMBER.value,
+                "can_view": True,
+            },
+            format="json",
+        )
+        self.assertEqual(acl_resp.status_code, 201)
+
+        list_resp = member_client.get("/api/v1/content/assets/")
+        self.assertEqual(list_resp.status_code, 200)
+        self.assertEqual(list_resp.json(), [])
+
+        detail_resp = member_client.get(f"/api/v1/content/assets/{asset_id}/")
+        self.assertEqual(detail_resp.status_code, 404)
+
+    def test_asset_version_logs_endpoint_returns_monotonic_history(self):
+        created = self._create_asset("asset-version-logs-1")
+        asset_id = created["id"]
+
+        publish_resp = self.admin_client.post(
+            f"/api/v1/content/assets/{asset_id}/publish/",
+            {},
+            format="json",
+        )
+        self.assertEqual(publish_resp.status_code, 200)
+
+        unpublish_resp = self.admin_client.post(
+            f"/api/v1/content/assets/{asset_id}/unpublish/",
+            {},
+            format="json",
+        )
+        self.assertEqual(unpublish_resp.status_code, 200)
+
+        response = self.admin_client.get(
+            f"/api/v1/content/assets/{asset_id}/version_logs/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        versions = [entry["version"] for entry in response.json()]
+        self.assertEqual(versions, sorted(versions, reverse=True))
+        self.assertEqual(list(reversed(versions)), [1, 2, 3])
+
+    def test_asset_version_logs_endpoint_forbids_members(self):
+        created = self._create_asset("asset-version-logs-forbidden")
+
+        response = self.member_client.get(
+            f"/api/v1/content/assets/{created['id']}/version_logs/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_asset_export_returns_json_list_for_managers(self):
+        self._create_asset("asset-export-json-1")
+        self._create_asset("asset-export-json-2")
+
+        manager = User.objects.create_user(
+            username="content-manager-export-json",
+            password="ValidPass123!",
+        )
+        self._assign_role(manager, self.org_a, RoleCode.CLUB_MANAGER.value)
+        manager_client = self._build_client(manager, self.org_a)
+
+        response = manager_client.get("/api/v1/content/assets/export/?format=json")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsInstance(response.json(), list)
+        self.assertEqual(
+            {item["external_id"] for item in response.json()},
+            {"asset-export-json-1", "asset-export-json-2"},
+        )
+
+    @override_settings(
+        REST_FRAMEWORK={
+            "DEFAULT_AUTHENTICATION_CLASSES": [
+                "iam.authentication.OrganizationSessionAuthentication",
+            ],
+            "DEFAULT_PERMISSION_CLASSES": [
+                "rest_framework.permissions.IsAuthenticated",
+            ],
+            "EXCEPTION_HANDLER": "common.exceptions.api_exception_handler",
+            "DEFAULT_THROTTLE_CLASSES": [
+                "rest_framework.throttling.ScopedRateThrottle",
+            ],
+            "DEFAULT_THROTTLE_RATES": {
+                "auth_login": "30/minute",
+                "downloads": "60/minute",
+            },
+            "URL_FORMAT_OVERRIDE": None,
+        }
+    )
+    def test_asset_export_returns_csv_for_managers(self):
+        self._create_asset("asset-export-csv-1")
+
+        manager = User.objects.create_user(
+            username="content-manager-export-csv",
+            password="ValidPass123!",
+        )
+        self._assign_role(manager, self.org_a, RoleCode.CLUB_MANAGER.value)
+        manager_client = self._build_client(manager, self.org_a)
+
+        response = manager_client.get("/api/v1/content/assets/export/?format=csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response["Content-Type"].startswith("text/csv"))
+        self.assertIn("asset-export-csv-1", response.content.decode("utf-8"))
+
+    def test_asset_export_forbids_members(self):
+        response = self.member_client.get("/api/v1/content/assets/export/?format=json")
+
+        self.assertEqual(response.status_code, 403)

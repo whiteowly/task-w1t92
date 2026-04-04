@@ -346,7 +346,13 @@ class GroupLeaderOnboardingViewSet(
             RoleCode.COUNSELOR_REVIEWER.value,
             RoleCode.GROUP_LEADER.value,
         ],
-        "create": [RoleCode.GROUP_LEADER.value],
+        "create": [
+            RoleCode.ADMINISTRATOR.value,
+            RoleCode.CLUB_MANAGER.value,
+            RoleCode.COUNSELOR_REVIEWER.value,
+            RoleCode.GROUP_LEADER.value,
+            RoleCode.MEMBER.value,
+        ],
         "review": [RoleCode.COUNSELOR_REVIEWER.value],
     }
 
@@ -360,7 +366,7 @@ class GroupLeaderOnboardingViewSet(
         role_codes = set(getattr(self.request, "role_codes", []))
         if role_codes.intersection(MANAGER_ROLES | REVIEWER_ROLES):
             return queryset
-        if GROUP_LEADER_ROLE in role_codes:
+        if GROUP_LEADER_ROLE in role_codes or RoleCode.MEMBER.value in role_codes:
             return queryset.filter(applicant=self.request.user)
         return queryset.none()
 

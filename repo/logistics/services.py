@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
+from common.constants import RoleCode
 from common.exceptions import DomainAPIException
 from logistics.models import GroupLeaderOnboarding, OnboardingStatus
 from observability.services import log_audit_event
@@ -92,6 +93,23 @@ def review_onboarding_application(
             "updated_at",
         ]
     )
+
+    if decision == OnboardingStatus.APPROVED:
+        from iam.models import Role, UserOrganizationRole
+
+        group_leader_role, _ = Role.objects.get_or_create(
+            code=RoleCode.GROUP_LEADER.value,
+            defaults={"name": "Group Leader"},
+        )
+        assignment, created = UserOrganizationRole.objects.get_or_create(
+            user=application.applicant,
+            organization=application.organization,
+            role=group_leader_role,
+            defaults={"is_active": True},
+        )
+        if not created and not assignment.is_active:
+            assignment.is_active = True
+            assignment.save(update_fields=["is_active", "updated_at"])
 
     log_audit_event(
         action=f"leader_onboarding.review.{decision}",

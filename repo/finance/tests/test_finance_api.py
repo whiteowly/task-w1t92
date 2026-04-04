@@ -331,3 +331,131 @@ class FinanceApiTests(TestCase):
             f"/api/v1/finance/settlements/{other_settlement.id}/"
         )
         self.assertEqual(cross_tenant.status_code, 404)
+
+    def test_ledger_entries_list_includes_generated_settlement_entry(self):
+        commission_rule_resp = self.admin_client.post(
+            "/api/v1/finance/commission-rules/",
+            {
+                "model_type": "fixed_per_order",
+                "fixed_amount": "10.00",
+                "tenant_cap_amount": "500.00",
+                "effective_from": "2025-01-01",
+            },
+            format="json",
+        )
+        self.assertEqual(commission_rule_resp.status_code, 201)
+
+        club = Club.objects.create(
+            organization=self.org_a,
+            name="Ledger Club",
+            code="LEDGER",
+        )
+        Membership.objects.create(
+            organization=self.org_a,
+            member=self.group_leader_a,
+            club=club,
+            status=MemberStatus.ACTIVE,
+        )
+        event = Event.objects.create(
+            organization=self.org_a,
+            club=club,
+            title="Ledger Settlement Event",
+            starts_at=timezone.now(),
+            ends_at=timezone.now() + timedelta(hours=1),
+            eligible_member_count_snapshot=1,
+        )
+        registration = EventRegistration.objects.create(
+            organization=self.org_a,
+            event=event,
+            member=self.group_leader_a,
+        )
+        EventRegistration.objects.filter(id=registration.id).update(
+            registered_at=datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+        )
+
+        generate_resp = self.admin_client.post(
+            "/api/v1/finance/settlements/generate/",
+            {"run_at": datetime(2026, 5, 1, 6, 0, tzinfo=UTC).isoformat()},
+            format="json",
+        )
+        self.assertEqual(generate_resp.status_code, 201)
+        settlement_id = str(generate_resp.json()["settlement"]["id"])
+
+        response = self.admin_client.get("/api/v1/finance/ledger-entries/")
+
+        self.assertEqual(response.status_code, 200)
+        matching_entries = [
+            entry
+            for entry in response.json()
+            if entry["entry_type"] == "settlement_generated"
+            and entry["reference_type"] == "settlement"
+            and entry["reference_id"] == settlement_id
+        ]
+        self.assertEqual(len(matching_entries), 1)
+        self.assertEqual(matching_entries[0]["amount"], "10.00")
+
+    def test_ledger_entries_list_is_tenant_isolated(self):
+        org_a_entry = LedgerEntry.objects.create(
+            organization=self.org_a,
+            entry_type="settlement_generated",
+            amount=Decimal("42.00"),
+            direction="credit",
+            reference_type="settlement",
+            reference_id="org-a-settlement",
+            occurred_at=timezone.now(),
+            metadata={"scope": "org-a"},
+        )
+        LedgerEntry.objects.create(
+            organization=self.org_b,
+            entry_type="settlement_generated",
+            amount=Decimal("7.00"),
+            direction="credit",
+            reference_type="settlement",
+            reference_id="org-b-settlement",
+            occurred_at=timezone.now(),
+            metadata={"scope": "org-b"},
+        )
+
+        response = self.admin_b_client.get("/api/v1/finance/ledger-entries/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {entry["reference_id"] for entry in response.json()},
+            {"org-b-settlement"},
+        )
+        self.assertNotIn(
+            str(org_a_entry.id), {str(entry["id"]) for entry in response.json()}
+        )
+
+    def test_dual_role_user_cannot_self_approve_high_value_withdrawal(self):
+        dual_role_user = User.objects.create_user(
+            username="fin-dual-role",
+            password="ValidPass123!",
+        )
+        self._assign_role(dual_role_user, self.org_a, RoleCode.GROUP_LEADER.value)
+        self._assign_role(
+            dual_role_user,
+            self.org_a,
+            RoleCode.COUNSELOR_REVIEWER.value,
+        )
+        dual_role_client = self._build_client(dual_role_user, self.org_a)
+
+        create_resp = dual_role_client.post(
+            "/api/v1/finance/withdrawal-requests/",
+            {"requester": dual_role_user.id, "amount": "300.00"},
+            format="json",
+        )
+        self.assertEqual(create_resp.status_code, 201)
+        self.assertEqual(create_resp.json()["status"], "pending_review")
+        request_id = create_resp.json()["id"]
+
+        review_resp = dual_role_client.post(
+            f"/api/v1/finance/withdrawal-requests/{request_id}/review/",
+            {"decision": "approved", "review_notes": "self-approve attempt"},
+            format="json",
+        )
+        self.assertEqual(review_resp.status_code, 400)
+        self.assertEqual(
+            review_resp.json()["error"]["code"],
+            "withdrawal.self_review_forbidden",
+        )

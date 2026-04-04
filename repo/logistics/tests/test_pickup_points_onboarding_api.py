@@ -423,3 +423,42 @@ class PickupPointAndOnboardingApiTests(TestCase):
         self.assertEqual(detail_resp.status_code, 200)
         self.assertEqual(detail_resp.json()["contact_phone"], "***-***-1212")
         self.assertNotEqual(detail_resp.json()["address_line1"], raw_address_line1)
+
+    def test_member_can_submit_onboarding_and_approval_grants_group_leader_role(self):
+        member = User.objects.create_user(
+            username="log-member-a",
+            password="ValidPass123!",
+        )
+        self._assign_role(member, self.org_a, RoleCode.MEMBER.value)
+        member_client = self._build_client(member, self.org_a)
+        pickup_point = self._create_pickup_point()
+
+        submit_resp = member_client.post(
+            "/api/v1/logistics/group-leader-onboardings/",
+            {
+                "pickup_point": pickup_point.id,
+                "document_title": "Member Application",
+                "document_type": "government_id",
+                "document_reference": "DOC-MEMBER-1",
+                "document_metadata": {"issuer": "DMV"},
+            },
+            format="json",
+        )
+        self.assertEqual(submit_resp.status_code, 201)
+        onboarding_id = submit_resp.json()["id"]
+
+        review_resp = self.reviewer_client.post(
+            f"/api/v1/logistics/group-leader-onboardings/{onboarding_id}/review/",
+            {"decision": "approved", "review_notes": "approved"},
+            format="json",
+        )
+        self.assertEqual(review_resp.status_code, 200)
+
+        self.assertTrue(
+            UserOrganizationRole.objects.filter(
+                user=member,
+                organization=self.org_a,
+                role__code=RoleCode.GROUP_LEADER.value,
+                is_active=True,
+            ).exists()
+        )

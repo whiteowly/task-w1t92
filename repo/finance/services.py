@@ -345,6 +345,17 @@ def review_withdrawal_request(
             message="Reviewer approval is required for withdrawals over $250.",
         )
 
+    if (
+        withdrawal_request.amount > REVIEW_THRESHOLD
+        and decision == WithdrawalStatus.APPROVED
+        and reviewer is not None
+        and reviewer.id == withdrawal_request.requester_id
+    ):
+        raise DomainAPIException(
+            code="withdrawal.self_review_forbidden",
+            message="Reviewer cannot be the same user as the requester.",
+        )
+
     withdrawal_request.status = decision
     withdrawal_request.review_notes = review_notes
     withdrawal_request.reviewed_by = reviewer

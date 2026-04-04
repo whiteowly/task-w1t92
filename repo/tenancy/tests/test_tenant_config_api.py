@@ -161,3 +161,23 @@ class TenantConfigApiTests(TestCase):
             format="json",
         )
         self.assertEqual(cross_tenant_rollback.status_code, 404)
+
+    def test_current_organization_returns_authenticated_org_details(self):
+        response = self.admin_client.get("/api/v1/tenancy/organizations/current/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "id": self.org_a.id,
+                "name": self.org_a.name,
+                "slug": self.org_a.slug,
+                "timezone": self.org_a.timezone,
+                "is_active": True,
+            },
+        )
+
+    def test_current_organization_requires_authentication(self):
+        response = APIClient().get("/api/v1/tenancy/organizations/current/")
+
+        self.assertEqual(response.status_code, 403)
