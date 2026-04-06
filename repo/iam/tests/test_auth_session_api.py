@@ -149,7 +149,7 @@ class AuthSessionApiTests(TestCase):
         self.assertEqual(new_password_login.status_code, 200)
 
     def test_login_lockout_applies_after_threshold(self):
-        for _ in range(settings.LOGIN_LOCKOUT_THRESHOLD):
+        for i in range(1, settings.LOGIN_LOCKOUT_THRESHOLD):
             invalid = self._login(
                 organization_slug=self.org.slug,
                 username=self.user.username,
@@ -163,7 +163,7 @@ class AuthSessionApiTests(TestCase):
         locked = self._login(
             organization_slug=self.org.slug,
             username=self.user.username,
-            password=self.password,
+            password="WrongPass999!",
         )
         self.assertEqual(locked.status_code, 429)
         self.assertEqual(locked.json()["error"]["code"], "auth.locked")
@@ -180,4 +180,41 @@ class AuthSessionApiTests(TestCase):
             password=self.password,
         )
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.json()["error"]["code"], "auth.not_in_organization")
+        self.assertEqual(response.json()["error"]["code"], "auth.invalid_credentials")
+
+    def test_login_unknown_organization_uses_generic_invalid_credentials_response(self):
+        unknown_org_response = self._login(
+            organization_slug="missing-org",
+            username=self.user.username,
+            password=self.password,
+        )
+        wrong_password_response = self._login(
+            organization_slug=self.org.slug,
+            username=self.user.username,
+            password="WrongPass999!",
+        )
+
+        self.assertEqual(unknown_org_response.status_code, 401)
+        self.assertEqual(
+            unknown_org_response.json()["error"]["code"], "auth.invalid_credentials"
+        )
+        self.assertEqual(wrong_password_response.status_code, 401)
+        self.assertEqual(
+            wrong_password_response.json()["error"]["code"],
+            unknown_org_response.json()["error"]["code"],
+        )
+
+    def test_session_rejected_after_organization_deactivation(self):
+        login_resp = self._login(
+            organization_slug=self.org.slug,
+            username=self.user.username,
+            password=self.password,
+        )
+        self.assertEqual(login_resp.status_code, 200)
+
+        session_client = self._session_client(login_resp.json()["session_key"])
+        self.org.is_active = False
+        self.org.save(update_fields=["is_active", "updated_at"])
+
+        me_resp = session_client.get("/api/v1/auth/me/")
+        self.assertEqual(me_resp.status_code, 403)

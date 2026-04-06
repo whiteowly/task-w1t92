@@ -1,11 +1,16 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from tenancy.views import (
     CurrentOrganizationView,
+    OrganizationViewSet,
     TenantConfigCurrentView,
     TenantConfigRollbackView,
     TenantConfigVersionListView,
 )
+
+router = DefaultRouter()
+router.register("organizations", OrganizationViewSet, basename="organization")
 
 urlpatterns = [
     path(
@@ -24,4 +29,5 @@ urlpatterns = [
         TenantConfigRollbackView.as_view(),
         name="tenant-config-rollback",
     ),
+    path("", include(router.urls)),
 ]

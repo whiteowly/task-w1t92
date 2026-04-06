@@ -26,6 +26,9 @@ class OrganizationSessionAuthentication(authentication.BaseAuthentication):
         if auth_session.expires_at <= timezone.now():
             raise exceptions.AuthenticationFailed("Session has expired.")
 
+        if not auth_session.organization.is_active:
+            raise exceptions.AuthenticationFailed("Organization is inactive.")
+
         if not auth_session.user.is_active:
             raise exceptions.AuthenticationFailed("User account is inactive.")
 

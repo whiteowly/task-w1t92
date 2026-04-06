@@ -1,13 +1,12 @@
 from django.utils.dateparse import parse_datetime
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
 from common.constants import RoleCode
 from common.exceptions import DomainAPIException
 from common.mixins import OrganizationScopedViewSetMixin
-from common.permissions import IsOrganizationMember
+from common.permissions import ActionRolePermission, IsOrganizationMember
 from observability.models import AuditLog, MetricsSnapshot, ReportExport
 from observability.serializers import (
     AuditLogSerializer,
@@ -17,20 +16,6 @@ from observability.serializers import (
     ReportExportSerializer,
 )
 from observability.services import create_metrics_snapshot, create_report_export
-
-
-class ActionRolePermission(BasePermission):
-    message = "Insufficient role for this action."
-
-    def has_permission(self, request, view):
-        action_roles = getattr(view, "action_roles", {})
-        required = action_roles.get(getattr(view, "action", None))
-        if not required:
-            required = getattr(view, "required_roles", None)
-        if not required:
-            return True
-        role_codes = set(getattr(request, "role_codes", []))
-        return bool(role_codes.intersection(set(required)))
 
 
 OBSERVABILITY_READ_ROLES = [

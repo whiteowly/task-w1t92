@@ -1,4 +1,6 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone as _tz
+
+UTC = _tz.utc
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -126,8 +128,8 @@ class SettlementSchedulerJobTests(TestCase):
             is_enabled=True,
         )
 
-        run_time = datetime(2026, 5, 1, 0, 5, tzinfo=UTC)
-        # Tokyo local: 09:05 on day 1 (due); NY local: 20:05 on previous day (not due)
+        run_time = datetime(2026, 4, 30, 17, 5, tzinfo=UTC)
+        # Tokyo local: 02:05 on day 1 (due); NY local: 13:05 on previous day (not due)
         run_job(job, now=run_time)
 
         self.assertTrue(Settlement.objects.filter(organization=tokyo_org).exists())

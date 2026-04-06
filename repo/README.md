@@ -30,11 +30,27 @@ Startup runs `wait_for_db` and `migrate` automatically before launching services
 Runtime secrets are generated automatically into a Docker named volume (`runtime_secrets`) on first start.
 No literal credentials or secret keys are committed in repository config.
 Primary Docker defaults run with `DJANGO_DEBUG=0` and scoped `DJANGO_ALLOWED_HOSTS` (`localhost,127.0.0.1,[::1],api`).
+The Django admin panel is disabled by default (`ENABLE_ADMIN_PANEL=0`) and is not part of standard tenant operations.
 
 Health endpoint:
 
 ```bash
 GET /api/v1/health/
+```
+
+## First-tenant bootstrap
+
+When no organization exists yet, tenant-scoped organization APIs are intentionally unavailable for creation. Bootstrap the first tenant and administrator once with:
+
+```bash
+python manage.py bootstrap_tenant \
+  --org-name "Heritage Org" \
+  --org-slug "heritage-org" \
+  --org-timezone "UTC" \
+  --admin-username "admin" \
+  --admin-password "StrongPassword123!" \
+  --admin-email "admin@example.com" \
+  --admin-full-name "Platform Admin"
 ```
 
 ## Broad test contract (primary)
@@ -138,7 +154,7 @@ Tenant config updates create immutable version snapshots and rollback creates a 
 - `GET/POST /api/v1/finance/withdrawal-requests/`
 - `POST /api/v1/finance/withdrawal-requests/{id}/review/`
 
-Settlement generation enforces tenant-local monthly timing (day 1 at 2:00 AM local) and records 7-day hold metadata. It is available both as an admin API action and as a scheduler-driven automatic monthly job. Withdrawals are ledger-only with blacklist and cap rules.
+Settlement generation enforces tenant-local monthly timing in a strict day-1 02:00-02:59 local window and records 7-day hold metadata. It is available both as an admin API action and as a scheduler-driven automatic monthly job. Manual triggers outside this window require `force=true` and a superuser account. Withdrawals are ledger-only with blacklist and cap rules.
 Withdrawals over $250 are reviewer-gated (`pending_review` -> reviewer approve/reject); withdrawals at or below $250 auto-approve and post ledger effects without reviewer intervention.
 
 ## Content asset endpoints (slice)

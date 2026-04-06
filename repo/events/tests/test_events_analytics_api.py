@@ -1,4 +1,6 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone as _tz
+
+UTC = _tz.utc
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase

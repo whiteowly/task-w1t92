@@ -1,8 +1,8 @@
 from django.contrib import admin
+from django.conf import settings
 from django.urls import include, path
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
     path("api/v1/health/", include("common.urls")),
     path("api/v1/auth/", include("iam.urls")),
     path("api/v1/tenancy/", include("tenancy.urls")),
@@ -14,3 +14,6 @@ urlpatterns = [
     path("api/v1/content/", include("content.urls")),
     path("api/v1/observability/", include("observability.urls")),
 ]
+
+if settings.ENABLE_ADMIN_PANEL:
+    urlpatterns.insert(0, path("admin/", admin.site.urls))

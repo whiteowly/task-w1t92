@@ -65,6 +65,11 @@ def authenticate_with_lockout(username, password, organization):
     user = authenticate(username=username, password=password)
     if user is None:
         register_login_failure(username=username, organization=organization)
+        can_login_after, wait_after = assert_not_locked(
+            username=username, organization=organization
+        )
+        if not can_login_after:
+            return None, "locked", wait_after
         return None, "invalid_credentials", 0
 
     is_member = UserOrganizationRole.objects.filter(

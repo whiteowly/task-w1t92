@@ -7,7 +7,11 @@ services:
       MYSQL_DATABASE: heritage_ops
       MYSQL_USER: heritage
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p\"$(cat /run/runtime-secrets/mysql_root_password)\" --silent"]
+      test:
+        [
+          "CMD-SHELL",
+          "MYSQL_PWD=\"$(cat /run/runtime-secrets/mysql_root_password)\" mysql -h 127.0.0.1 -uroot -e \"SELECT 1\" >/dev/null 2>&1",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -24,11 +28,14 @@ services:
         condition: service_healthy
     environment:
       DJANGO_DEBUG: "0"
+      ENABLE_ADMIN_PANEL: "0"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,[::1],api"
       DJANGO_SECRET_KEY_FILE: /run/runtime-secrets/django_secret_key
+      DATA_ENCRYPTION_KEY: local-dev-data-encryption-key
       MYSQL_HOST: db
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: heritage_ops
+      MYSQL_TEST_DATABASE: test_heritage_ops
       MYSQL_USER: heritage
       MYSQL_PASSWORD_FILE: /run/runtime-secrets/mysql_user_password
       TZ: UTC
@@ -52,11 +59,14 @@ services:
     environment:
       SKIP_MIGRATE: "1"
       DJANGO_DEBUG: "0"
+      ENABLE_ADMIN_PANEL: "0"
       DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1,[::1],api"
       DJANGO_SECRET_KEY_FILE: /run/runtime-secrets/django_secret_key
+      DATA_ENCRYPTION_KEY: local-dev-data-encryption-key
       MYSQL_HOST: db
       MYSQL_PORT: "3306"
       MYSQL_DATABASE: heritage_ops
+      MYSQL_TEST_DATABASE: test_heritage_ops
       MYSQL_USER: heritage
       MYSQL_PASSWORD_FILE: /run/runtime-secrets/mysql_user_password
       TZ: UTC

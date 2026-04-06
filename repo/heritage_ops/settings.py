@@ -27,6 +27,7 @@ def env_or_file(name: str, default: str | None = None) -> str | None:
 SECRET_KEY = env_or_file("DJANGO_SECRET_KEY", default=get_random_secret_key())
 DATA_ENCRYPTION_KEY = env_or_file("DATA_ENCRYPTION_KEY", default=None)
 DEBUG = os.getenv("DJANGO_DEBUG", "0") == "1"
+ENABLE_ADMIN_PANEL = os.getenv("ENABLE_ADMIN_PANEL", "0") == "1"
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv(

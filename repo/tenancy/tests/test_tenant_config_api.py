@@ -166,16 +166,12 @@ class TenantConfigApiTests(TestCase):
         response = self.admin_client.get("/api/v1/tenancy/organizations/current/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            {
-                "id": self.org_a.id,
-                "name": self.org_a.name,
-                "slug": self.org_a.slug,
-                "timezone": self.org_a.timezone,
-                "is_active": True,
-            },
-        )
+        data = response.json()
+        self.assertEqual(data["id"], self.org_a.id)
+        self.assertEqual(data["name"], self.org_a.name)
+        self.assertEqual(data["slug"], self.org_a.slug)
+        self.assertEqual(data["timezone"], self.org_a.timezone)
+        self.assertTrue(data["is_active"])
 
     def test_current_organization_requires_authentication(self):
         response = APIClient().get("/api/v1/tenancy/organizations/current/")

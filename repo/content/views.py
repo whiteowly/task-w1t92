@@ -5,13 +5,12 @@ from django.http import FileResponse, Http404, HttpResponse
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
-from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from common.constants import RoleCode
 from common.mixins import OrganizationScopedViewSetMixin
-from common.permissions import IsOrganizationMember
+from common.permissions import ActionRolePermission, IsOrganizationMember
+from common.roles import MANAGER_ROLE_CODES, ROLE_PERMISSIONS_MAP
 from content.models import (
     AssetState,
     ChapterACLPrincipal,
@@ -39,36 +38,22 @@ from content.serializers import (
     ContentChapterACLSerializer,
     ContentChapterSerializer,
 )
-from content.services import (
+from content.services.assets import (
     IMPORT_FIELDS,
     bulk_import_items,
-    create_redeem_code,
     create_asset,
-    generate_secured_download_artifact,
-    grant_subscription_entitlement,
-    issue_download_token,
     parse_csv_rows,
-    redeem_code,
     set_asset_state,
     update_asset,
 )
+from content.services.entitlements import (
+    create_redeem_code,
+    grant_subscription_entitlement,
+    redeem_code,
+)
+from content.services.processing import generate_secured_download_artifact
+from content.services.tokens import issue_download_token
 from observability.services import log_audit_event
-
-MANAGER_ROLES = {RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value}
-
-
-class ActionRolePermission(BasePermission):
-    message = "Insufficient role for this action."
-
-    def has_permission(self, request, view):
-        action_roles = getattr(view, "action_roles", {})
-        required = action_roles.get(getattr(view, "action", None))
-        if not required:
-            required = getattr(view, "required_roles", None)
-        if not required:
-            return True
-        role_codes = set(getattr(request, "role_codes", []))
-        return bool(role_codes.intersection(set(required)))
 
 
 class ContentAssetViewSet(OrganizationScopedViewSetMixin, viewsets.ModelViewSet):
@@ -76,25 +61,12 @@ class ContentAssetViewSet(OrganizationScopedViewSetMixin, viewsets.ModelViewSet)
     serializer_class = ContentAssetSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [role.value for role in RoleCode],
-        "retrieve": [role.value for role in RoleCode],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "publish": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "unpublish": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "version_logs": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "import_json": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "import_csv": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "export": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentAssetViewSet"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
         role_codes = set(getattr(self.request, "role_codes", []))
-        if role_codes.intersection(MANAGER_ROLES):
+        if role_codes.intersection(MANAGER_ROLE_CODES):
             return queryset
 
         user_id = str(self.request.user.id)
@@ -275,19 +247,12 @@ class ContentChapterViewSet(OrganizationScopedViewSetMixin, viewsets.ModelViewSe
     queryset = ContentChapter.objects.select_related("asset").all()
     serializer_class = ContentChapterSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [role.value for role in RoleCode],
-        "retrieve": [role.value for role in RoleCode],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentChapterViewSet"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
         role_codes = set(getattr(self.request, "role_codes", []))
-        if role_codes.intersection(MANAGER_ROLES):
+        if role_codes.intersection(MANAGER_ROLE_CODES):
             return queryset
 
         user_id = str(self.request.user.id)
@@ -356,14 +321,7 @@ class ContentChapterACLViewSet(OrganizationScopedViewSetMixin, viewsets.ModelVie
     queryset = ContentChapterACL.objects.select_related("chapter").all()
     serializer_class = ContentChapterACLSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "retrieve": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentChapterACLViewSet"]
 
     def perform_create(self, serializer):
         acl = serializer.save(organization=self.get_organization())
@@ -410,14 +368,7 @@ class ContentEntitlementViewSet(OrganizationScopedViewSetMixin, viewsets.ModelVi
     queryset = ContentEntitlement.objects.select_related("asset", "user").all()
     serializer_class = ContentEntitlementSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "retrieve": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentEntitlementViewSet"]
 
     def perform_create(self, serializer):
         entitlement = grant_subscription_entitlement(
@@ -439,11 +390,7 @@ class ContentRedeemCodeViewSet(
     queryset = ContentRedeemCode.objects.select_related("asset", "redeemed_by").all()
     serializer_class = ContentRedeemCodeSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "redeem": [role.value for role in RoleCode],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentRedeemCodeViewSet"]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -501,10 +448,7 @@ class ContentDownloadTokenViewSet(
     queryset = ContentDownloadToken.objects.select_related("asset", "user").all()
     serializer_class = ContentDownloadTokenSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [role.value for role in RoleCode],
-        "create": [role.value for role in RoleCode],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["content"]["ContentDownloadTokenViewSet"]
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -514,7 +458,7 @@ class ContentDownloadTokenViewSet(
     def get_queryset(self):
         queryset = super().get_queryset()
         role_codes = set(getattr(self.request, "role_codes", []))
-        if role_codes.intersection(MANAGER_ROLES):
+        if role_codes.intersection(MANAGER_ROLE_CODES):
             return queryset
         return queryset.filter(user=self.request.user)
 

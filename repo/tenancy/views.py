@@ -1,10 +1,13 @@
+from rest_framework import status, viewsets
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from common.constants import RoleCode
 from common.exceptions import DomainAPIException
-from tenancy.models import TenantConfigVersion
+from common.permissions import ActionRolePermission, IsOrganizationMember
+from observability.services import log_audit_event
+from tenancy.models import Organization, TenantConfigVersion
 from tenancy.serializers import (
     OrganizationSerializer,
     TenantConfigRollbackSerializer,
@@ -27,6 +30,71 @@ class RolePermission(BasePermission):
             return True
         role_codes = set(getattr(request, "role_codes", []))
         return bool(role_codes.intersection(set(required_roles)))
+
+
+class OrganizationViewSet(viewsets.ModelViewSet):
+    serializer_class = OrganizationSerializer
+    permission_classes = [IsOrganizationMember, ActionRolePermission]
+    action_roles = {
+        "list": [RoleCode.ADMINISTRATOR.value],
+        "retrieve": [RoleCode.ADMINISTRATOR.value],
+        "create": [RoleCode.ADMINISTRATOR.value],
+        "update": [RoleCode.ADMINISTRATOR.value],
+        "partial_update": [RoleCode.ADMINISTRATOR.value],
+        "destroy": [RoleCode.ADMINISTRATOR.value],
+    }
+
+    def get_queryset(self):
+        organization = getattr(self.request, "organization", None)
+        if organization is None:
+            return Organization.objects.none()
+        return Organization.objects.filter(id=organization.id)
+
+    def _enforce_active_tenant_object(self, organization: Organization):
+        active_organization = getattr(self.request, "organization", None)
+        if active_organization is None or organization.id != active_organization.id:
+            raise DomainAPIException(
+                code="organization.cross_tenant",
+                message="Organization is outside your active tenant.",
+                status_code=404,
+            )
+
+    def get_object(self):
+        organization = super().get_object()
+        self._enforce_active_tenant_object(organization)
+        return organization
+
+    def perform_create(self, serializer):
+        raise DomainAPIException(
+            code="organization.create_forbidden",
+            message="Organizations can only be created through platform provisioning.",
+            status_code=403,
+        )
+
+    def perform_update(self, serializer):
+        self._enforce_active_tenant_object(serializer.instance)
+        org = serializer.save()
+        log_audit_event(
+            action="organization.update",
+            organization=self.request.organization,
+            actor_user=self.request.user,
+            request=self.request,
+            resource_type="organization",
+            resource_id=str(org.id),
+        )
+
+    def perform_destroy(self, instance):
+        self._enforce_active_tenant_object(instance)
+        org_id = instance.id
+        super().perform_destroy(instance)
+        log_audit_event(
+            action="organization.delete",
+            organization=self.request.organization,
+            actor_user=self.request.user,
+            request=self.request,
+            resource_type="organization",
+            resource_id=str(org_id),
+        )
 
 
 class CurrentOrganizationView(APIView):

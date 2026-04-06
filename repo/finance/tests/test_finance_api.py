@@ -1,4 +1,6 @@
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone as _tz
+
+UTC = _tz.utc
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -43,6 +45,12 @@ class FinanceApiTests(TestCase):
         self.admin_b = User.objects.create_user(
             username="fin-admin-b", password="ValidPass123!"
         )
+        self.super_admin_a = User.objects.create_user(
+            username="fin-super-admin-a",
+            password="ValidPass123!",
+            is_superuser=True,
+            is_staff=True,
+        )
 
         self._assign_role(self.admin_a, self.org_a, RoleCode.ADMINISTRATOR.value)
         self._assign_role(
@@ -52,6 +60,7 @@ class FinanceApiTests(TestCase):
         self._assign_role(self.group_leader_b, self.org_a, RoleCode.GROUP_LEADER.value)
         self._assign_role(self.group_leader_c, self.org_a, RoleCode.GROUP_LEADER.value)
         self._assign_role(self.admin_b, self.org_b, RoleCode.ADMINISTRATOR.value)
+        self._assign_role(self.super_admin_a, self.org_a, RoleCode.ADMINISTRATOR.value)
 
         self.admin_client = self._build_client(self.admin_a, self.org_a)
         self.reviewer_client = self._build_client(self.reviewer_a, self.org_a)
@@ -59,6 +68,7 @@ class FinanceApiTests(TestCase):
         self.leader_b_client = self._build_client(self.group_leader_b, self.org_a)
         self.leader_c_client = self._build_client(self.group_leader_c, self.org_a)
         self.admin_b_client = self._build_client(self.admin_b, self.org_b)
+        self.super_admin_client = self._build_client(self.super_admin_a, self.org_a)
 
     def _assign_role(self, user, organization, role_code):
         role = Role.objects.get(code=role_code)
@@ -291,6 +301,17 @@ class FinanceApiTests(TestCase):
         self.assertEqual(not_due_resp.status_code, 400)
         self.assertEqual(not_due_resp.json()["error"]["code"], "settlement.not_due")
 
+        outside_window = datetime(2026, 5, 1, 7, 0, tzinfo=UTC)  # 03:00 local NY
+        outside_window_resp = self.admin_client.post(
+            "/api/v1/finance/settlements/generate/",
+            {"run_at": outside_window.isoformat()},
+            format="json",
+        )
+        self.assertEqual(outside_window_resp.status_code, 400)
+        self.assertEqual(
+            outside_window_resp.json()["error"]["code"], "settlement.not_due"
+        )
+
         due_at = datetime(2026, 5, 1, 6, 0, tzinfo=UTC)  # 02:00 local NY
         due_resp = self.admin_client.post(
             "/api/v1/finance/settlements/generate/",
@@ -331,6 +352,60 @@ class FinanceApiTests(TestCase):
             f"/api/v1/finance/settlements/{other_settlement.id}/"
         )
         self.assertEqual(cross_tenant.status_code, 404)
+
+    def test_settlement_force_flag_requires_superuser(self):
+        self.admin_client.post(
+            "/api/v1/finance/commission-rules/",
+            {
+                "model_type": "fixed_per_order",
+                "fixed_amount": "10.00",
+                "tenant_cap_amount": "500.00",
+                "effective_from": "2025-01-01",
+            },
+            format="json",
+        )
+        club = Club.objects.create(
+            organization=self.org_a, name="Force Club", code="FORCE"
+        )
+        Membership.objects.create(
+            organization=self.org_a,
+            member=self.group_leader_a,
+            club=club,
+            status=MemberStatus.ACTIVE,
+        )
+        event = Event.objects.create(
+            organization=self.org_a,
+            club=club,
+            title="Force Event",
+            starts_at=timezone.now(),
+            ends_at=timezone.now() + timedelta(hours=1),
+            eligible_member_count_snapshot=1,
+        )
+        registration = EventRegistration.objects.create(
+            organization=self.org_a,
+            event=event,
+            member=self.group_leader_a,
+        )
+        EventRegistration.objects.filter(id=registration.id).update(
+            registered_at=datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+        )
+
+        outside_window = datetime(2026, 5, 1, 7, 0, tzinfo=UTC)  # 03:00 local NY
+        non_super = self.admin_client.post(
+            "/api/v1/finance/settlements/generate/",
+            {"run_at": outside_window.isoformat(), "force": True},
+            format="json",
+        )
+        self.assertEqual(non_super.status_code, 400)
+        self.assertEqual(non_super.json()["error"]["code"], "settlement.not_due")
+
+        superuser_forced = self.super_admin_client.post(
+            "/api/v1/finance/settlements/generate/",
+            {"run_at": outside_window.isoformat(), "force": True},
+            format="json",
+        )
+        self.assertEqual(superuser_forced.status_code, 201)
+        self.assertTrue(superuser_forced.json()["created"])
 
     def test_ledger_entries_list_includes_generated_settlement_entry(self):
         commission_rule_resp = self.admin_client.post(

@@ -105,6 +105,7 @@ class SettlementSerializer(serializers.ModelSerializer):
 
 class SettlementGenerateSerializer(serializers.Serializer):
     run_at = serializers.DateTimeField(required=False)
+    force = serializers.BooleanField(required=False, default=False)
 
 
 class WithdrawalBlacklistSerializer(serializers.ModelSerializer):

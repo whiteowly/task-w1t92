@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone as _tz
+
+UTC = _tz.utc
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -114,15 +116,20 @@ def _compute_settlement_amount(*, organization, period_start_utc, period_end_utc
 
 
 @transaction.atomic
-def generate_monthly_settlement(*, organization, actor, request, run_at_utc=None):
+def generate_monthly_settlement(
+    *, organization, actor, request, run_at_utc=None, force: bool = False
+):
     run_at_utc = run_at_utc or timezone.now()
     org_tz = _organization_tz(organization)
     run_local = run_at_utc.astimezone(org_tz)
 
-    if run_local.day != 1 or run_local.hour < 2:
+    is_day1_window = run_local.day == 1 and run_local.hour == 2
+    can_force = bool(force and actor is not None and actor.is_superuser)
+
+    if not is_day1_window and not can_force:
         raise DomainAPIException(
             code="settlement.not_due",
-            message="Settlement generation is allowed only from day 1 at 02:00 local time.",
+            message="Settlement generation is allowed only between 02:00 and 02:59 local time on day 1.",
         )
 
     period_year, period_month, start_utc, end_utc = (

@@ -33,22 +33,102 @@ SENSITIVE_KEYS = {
     "postal_code",
     "country",
     "contact_phone",
+    "config_payload",
+    "credit_card",
+    "card_number",
+    "cvv",
+    "authorization",
+    "api_key",
+    "private_key",
+    "access_token",
+    "refresh_token",
 }
+
+REDACTION_TOKEN = "***REDACTED***"
 
 METRICS_KEY_OPS_SUMMARY = "ops.summary.v1"
 REPORT_TYPE_AUDIT_LOG_CSV = "audit_log_csv"
 REPORT_TYPE_METRICS_SNAPSHOT_JSON = "metrics_snapshot_json"
 
 
+STRICT_SENSITIVE_SUFFIXES = {
+    "password",
+    "newpassword",
+    "oldpassword",
+    "passwd",
+    "passwdhash",
+    "token",
+    "accesstoken",
+    "refreshtoken",
+    "sessionkey",
+    "redeemcode",
+    "secret",
+    "secretkey",
+    "secretvalue",
+    "apikey",
+    "privatekey",
+    "privatekeypem",
+    "credential",
+    "credentialhash",
+    "authorization",
+    "ssn",
+    "phone",
+    "address",
+    "addressline1",
+    "addressline2",
+    "postalcode",
+    "country",
+    "city",
+    "state",
+    "contactphone",
+    "creditcard",
+    "cardnumber",
+    "cvv",
+    "accountnumber",
+}
+
+OPAQUE_SENSITIVE_KEYS = {
+    "configpayload",
+}
+
+NORMALIZED_SENSITIVE_KEYS = {
+    "".join(ch for ch in key.lower() if ch.isalnum()) for key in SENSITIVE_KEYS
+}
+
+
+def _normalize_path_segment(segment: str) -> str:
+    return "".join(ch for ch in segment.lower() if ch.isalnum())
+
+
+def _should_redact_path(path: tuple[str, ...]) -> bool:
+    if not path:
+        return False
+    leaf = path[-1]
+    if leaf in NORMALIZED_SENSITIVE_KEYS:
+        return True
+    if leaf in OPAQUE_SENSITIVE_KEYS:
+        return True
+    return any(leaf.endswith(suffix) for suffix in STRICT_SENSITIVE_SUFFIXES)
+
+
+def _redact_value(value, *, path: tuple[str, ...] = ()):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            child_path = (*path, _normalize_path_segment(key))
+            if _should_redact_path(child_path):
+                redacted[key] = REDACTION_TOKEN
+            else:
+                redacted[key] = _redact_value(item, path=child_path)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_value(item, path=(*path, "[]")) for item in value]
+    return value
+
+
 def _redact(payload: dict | None) -> dict:
     payload = payload or {}
-    redacted = {}
-    for key, value in payload.items():
-        if key.lower() in SENSITIVE_KEYS:
-            redacted[key] = "***REDACTED***"
-        else:
-            redacted[key] = value
-    return redacted
+    return _redact_value(payload)
 
 
 def log_audit_event(

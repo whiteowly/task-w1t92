@@ -6,15 +6,18 @@ from functools import lru_cache
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
 
 @lru_cache(maxsize=1)
 def _fernet() -> Fernet:
-    key_material = getattr(settings, "DATA_ENCRYPTION_KEY", None) or getattr(
-        settings, "SECRET_KEY", ""
-    )
+    key_material = getattr(settings, "DATA_ENCRYPTION_KEY", None)
     if not key_material:
-        raise ValueError("Missing encryption key material.")
+        if not getattr(settings, "DEBUG", False):
+            raise ImproperlyConfigured(
+                "DATA_ENCRYPTION_KEY must be configured when DEBUG is False."
+            )
+        raise ImproperlyConfigured("DATA_ENCRYPTION_KEY is not configured.")
 
     digest = hashlib.sha256(key_material.encode("utf-8")).digest()
     key = base64.urlsafe_b64encode(digest)

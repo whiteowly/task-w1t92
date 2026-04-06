@@ -1,11 +1,14 @@
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
-from common.constants import RoleCode
 from common.mixins import OrganizationScopedViewSetMixin
-from common.permissions import IsOrganizationMember
+from common.permissions import ActionRolePermission, IsOrganizationMember
+from common.roles import (
+    COUNSELOR_REVIEWER_ROLE_CODE,
+    MANAGER_ROLE_CODES,
+    ROLE_PERMISSIONS_MAP,
+)
 from finance.models import (
     CommissionRule,
     LedgerEntry,
@@ -29,43 +32,12 @@ from finance.services import (
 )
 from observability.services import log_audit_event
 
-MANAGER_ROLES = {RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value}
-
-
-class ActionRolePermission(BasePermission):
-    message = "Insufficient role for this action."
-
-    def has_permission(self, request, view):
-        action_roles = getattr(view, "action_roles", {})
-        required = action_roles.get(getattr(view, "action", None))
-        if not required:
-            required = getattr(view, "required_roles", None)
-        if not required:
-            return True
-        role_codes = set(getattr(request, "role_codes", []))
-        return bool(role_codes.intersection(set(required)))
-
 
 class CommissionRuleViewSet(OrganizationScopedViewSetMixin, viewsets.ModelViewSet):
     queryset = CommissionRule.objects.all()
     serializer_class = CommissionRuleSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-        ],
-        "retrieve": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-        ],
-        "create": [RoleCode.ADMINISTRATOR.value],
-        "update": [RoleCode.ADMINISTRATOR.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["finance"]["CommissionRuleViewSet"]
 
     def perform_create(self, serializer):
         rule = serializer.save(organization=self.get_organization())
@@ -112,18 +84,7 @@ class LedgerEntryViewSet(
     queryset = LedgerEntry.objects.all().order_by("-occurred_at", "-id")
     serializer_class = LedgerEntrySerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-        ],
-        "retrieve": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-        ],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["finance"]["LedgerEntryViewSet"]
 
 
 class SettlementViewSet(
@@ -135,21 +96,7 @@ class SettlementViewSet(
     queryset = Settlement.objects.all().order_by("-period_year", "-period_month")
     serializer_class = SettlementSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-            RoleCode.GROUP_LEADER.value,
-        ],
-        "retrieve": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-            RoleCode.GROUP_LEADER.value,
-        ],
-        "generate": [RoleCode.ADMINISTRATOR.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["finance"]["SettlementViewSet"]
 
     @action(detail=False, methods=["post"])
     def generate(self, request):
@@ -160,6 +107,7 @@ class SettlementViewSet(
             actor=request.user,
             request=request,
             run_at_utc=serializer.validated_data.get("run_at"),
+            force=serializer.validated_data.get("force", False),
         )
         return Response(
             {
@@ -174,14 +122,7 @@ class WithdrawalBlacklistViewSet(OrganizationScopedViewSetMixin, viewsets.ModelV
     queryset = WithdrawalBlacklist.objects.select_related("user").all()
     serializer_class = WithdrawalBlacklistSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "retrieve": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "create": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "partial_update": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-        "destroy": [RoleCode.ADMINISTRATOR.value, RoleCode.CLUB_MANAGER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["finance"]["WithdrawalBlacklistViewSet"]
 
     def perform_create(self, serializer):
         item = serializer.save(organization=self.get_organization())
@@ -207,35 +148,15 @@ class WithdrawalRequestViewSet(
     ).all()
     serializer_class = WithdrawalRequestSerializer
     permission_classes = [IsOrganizationMember, ActionRolePermission]
-    action_roles = {
-        "list": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-            RoleCode.GROUP_LEADER.value,
-        ],
-        "retrieve": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.COUNSELOR_REVIEWER.value,
-            RoleCode.GROUP_LEADER.value,
-        ],
-        "create": [
-            RoleCode.ADMINISTRATOR.value,
-            RoleCode.CLUB_MANAGER.value,
-            RoleCode.GROUP_LEADER.value,
-        ],
-        "review": [RoleCode.COUNSELOR_REVIEWER.value],
-    }
+    action_roles = ROLE_PERMISSIONS_MAP["finance"]["WithdrawalRequestViewSet"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
         role_codes = set(getattr(self.request, "role_codes", []))
         if role_codes.intersection(
             {
-                RoleCode.ADMINISTRATOR.value,
-                RoleCode.CLUB_MANAGER.value,
-                RoleCode.COUNSELOR_REVIEWER.value,
+                *MANAGER_ROLE_CODES,
+                COUNSELOR_REVIEWER_ROLE_CODE,
             }
         ):
             return queryset
@@ -245,7 +166,7 @@ class WithdrawalRequestViewSet(
         role_codes = set(getattr(self.request, "role_codes", []))
         requester = serializer.validated_data["requester"]
         if (
-            not role_codes.intersection(MANAGER_ROLES)
+            not role_codes.intersection(MANAGER_ROLE_CODES)
             and requester.id != self.request.user.id
         ):
             from common.exceptions import DomainAPIException
