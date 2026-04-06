@@ -63,17 +63,24 @@ class GroupLeaderOperationsTests(TestCase):
 
     def _assign_role(self, user, role_code):
         role = Role.objects.get(code=role_code)
-        UserOrganizationRole.objects.create(
-            user=user, organization=self.org, role=role
-        )
+        UserOrganizationRole.objects.create(user=user, organization=self.org, role=role)
 
     def _authenticated_client(self, user):
         client = APIClient()
         resp = client.post(
             "/api/v1/auth/login/",
-            {"organization_slug": self.org.slug, "username": user.username, "password": self.password},
+            {
+                "organization_slug": self.org.slug,
+                "username": user.username,
+                "password": self.password,
+            },
             format="json",
         )
+        if resp.status_code != 200:
+            print(
+                f"Login failed for {user.username}: status={resp.status_code} body={resp.content.decode('utf-8', errors='replace')}"
+            )
+        self.assertEqual(resp.status_code, 200)
         client.credentials(HTTP_X_SESSION_KEY=resp.json()["session_key"])
         return client
 
