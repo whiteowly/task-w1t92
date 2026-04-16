@@ -77,6 +77,20 @@ class OrganizationApiTests(TestCase):
         self.org.refresh_from_db()
         self.assertEqual(self.org.name, "Updated Org")
 
+    def test_full_update_organization(self):
+        resp = self.admin_client.put(
+            f"/api/v1/tenancy/organizations/{self.org.id}/",
+            {
+                "name": "Main Org Updated",
+                "slug": "main-org",
+                "timezone": "UTC",
+                "is_active": True,
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["name"], "Main Org Updated")
+
     def test_non_admin_gets_403(self):
         resp = self.member_client.get("/api/v1/tenancy/organizations/")
         self.assertEqual(resp.status_code, 403)

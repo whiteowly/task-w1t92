@@ -98,8 +98,9 @@ class TenantConfigApiTests(TestCase):
         self.assertEqual(versions_resp.status_code, 200)
         self.assertEqual(len(versions_resp.json()), 2)
 
+        v1_id = v1_resp.json()["id"]
         rollback_resp = self.admin_client.post(
-            "/api/v1/tenancy/config/versions/1/rollback/",
+            f"/api/v1/tenancy/config/versions/{v1_id}/rollback/",
             {"change_summary": "Rollback to v1"},
             format="json",
         )

@@ -18,7 +18,15 @@ This repository now includes working domain slices with production-minded cross-
 - Finance commissions, settlements, and workflow-gated withdrawals
 - Content assets, chapter ACL, entitlement/redeem-code issuance, and secured watermarked downloads
 
+## Project type
+
+`backend`
+
 ## Runtime contract (primary)
+
+```bash
+docker-compose up
+```
 
 ```bash
 docker compose up --build
@@ -29,6 +37,7 @@ API is exposed at `http://localhost:8000`.
 Startup runs `wait_for_db` and `migrate` automatically before launching services.
 Runtime secrets are generated automatically into a Docker named volume (`runtime_secrets`) on first start.
 No literal credentials or secret keys are committed in repository config.
+This repository is Docker-contained for runtime and verification: do not run `pip install`, `apt-get`, or manual DB setup steps.
 Primary Docker defaults run with `DJANGO_DEBUG=0` and scoped `DJANGO_ALLOWED_HOSTS` (`localhost,127.0.0.1,[::1],api`).
 The Django admin panel is disabled by default (`ENABLE_ADMIN_PANEL=0`) and is not part of standard tenant operations.
 
@@ -38,12 +47,12 @@ Health endpoint:
 GET /api/v1/health/
 ```
 
-## First-tenant bootstrap
+## First-tenant bootstrap (Docker only)
 
 When no organization exists yet, tenant-scoped organization APIs are intentionally unavailable for creation. Bootstrap the first tenant and administrator once with:
 
 ```bash
-python manage.py bootstrap_tenant \
+docker compose exec api python manage.py bootstrap_tenant \
   --org-name "Heritage Org" \
   --org-slug "heritage-org" \
   --org-timezone "UTC" \
@@ -53,6 +62,28 @@ python manage.py bootstrap_tenant \
   --admin-full-name "Platform Admin"
 ```
 
+## Demo credentials (all roles)
+
+Authentication is required.
+
+After bootstrap, seed all demo users deterministically with a single command:
+
+```bash
+docker compose exec api python manage.py seed_demo_users --org-slug heritage-org
+```
+
+This creates the following users (idempotent — safe to run multiple times):
+
+| Role | Username | Email | Password |
+|---|---|---|---|
+| administrator | `admin` | `admin@example.com` | `StrongPassword123!` |
+| club_manager | `club.manager` | `club.manager@example.com` | `StrongPassword123!` |
+| counselor_reviewer | `counselor.reviewer` | `counselor.reviewer@example.com` | `StrongPassword123!` |
+| group_leader | `group.leader` | `group.leader@example.com` | `StrongPassword123!` |
+| member | `member.user` | `member.user@example.com` | `StrongPassword123!` |
+
+The administrator user is also created by the `bootstrap_tenant` command above. The seed command adds the remaining four role-specific demo users.
+
 ## Broad test contract (primary)
 
 ```bash
@@ -61,22 +92,34 @@ python manage.py bootstrap_tenant \
 
 This runs the broad test path through Docker/MySQL and is the canonical full verification command.
 
-## Ordinary local iteration
+## Verification method (API)
 
-Install dependencies:
-
-```bash
-pip install -r requirements-dev.txt
-```
-
-Fast checks during iteration:
+1) Verify service reachability:
 
 ```bash
-python manage.py check
-pytest -q
+curl -sS http://localhost:8000/api/v1/health/
 ```
 
-Note: local commands use the active runtime database settings. The full project verification path remains `./run_tests.sh`.
+Expected: JSON with `status: "ok"`.
+
+2) Verify login flow:
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/auth/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"organization_slug":"heritage-org","username":"admin","password":"StrongPassword123!"}'
+```
+
+Expected: JSON containing `session_key`, `expires_at`, `organization`, and `roles`.
+
+3) Verify authenticated access:
+
+```bash
+curl -sS http://localhost:8000/api/v1/auth/me/ \
+  -H 'X-Session-Key: <session_key_from_login>'
+```
+
+Expected: JSON with user identity, active organization, and assigned roles.
 
 ## Auth foundation endpoints
 
